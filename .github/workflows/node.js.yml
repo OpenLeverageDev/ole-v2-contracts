@@ -26,11 +26,3 @@ jobs:
       - run: npm install
       - run: npx hardhat coverage
 
-      - uses: codecov/codecov-action@v3
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          verbose: true
-          files: ./coverage/lcov.info
-          flags: production
-
-
