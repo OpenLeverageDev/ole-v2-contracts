@@ -1,0 +1,9 @@
+/.idea
+/build
+/node_modules
+/package-lock.json
+/coverage.json
+.DS_Store
+/artifacts
+/coverage
+/cache
