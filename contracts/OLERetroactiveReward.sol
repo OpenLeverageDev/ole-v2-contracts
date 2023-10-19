@@ -65,7 +65,7 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
     event Vested(uint256 epochId, address account, uint256 balance, uint256 vestTime);
     event RewardWithdrew(uint256 epochId, address account, uint withdraw);
     event RewardExited(uint256 epochId, address account, uint penalty);
-    event RewardConverted(uint256 epochId, address account, uint penalty);
+    event RewardConverted(uint256 epochId, address account, uint convert);
 
     event EpochAdded(uint256 epochId, bytes32 merkleRoot, uint256 total, uint256 startTime, uint256 expireTime, uint256 vestDuration, uint16 unlockPenaltyBase, uint16 unlockPenaltyAdd);
     event ExpiredWithdrew(uint256 epochId, uint expire);
