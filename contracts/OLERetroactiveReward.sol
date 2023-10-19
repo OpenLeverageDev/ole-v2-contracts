@@ -234,6 +234,7 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
         }
         require(unlockTime >= block.timestamp + config.minXOLELockTime, "Lock Time ERR");
         uint256 liquidity = getLp(oleAmount, token1Amount, slippage);
+        IERC20(config.lpToken).safeApprove(config.xole, liquidity);
         if (amount > 0){
             IXOLE(config.xole).increase_amount_for(msg.sender, liquidity);
         } else {
