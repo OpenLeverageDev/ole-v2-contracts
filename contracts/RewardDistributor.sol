@@ -9,7 +9,7 @@ import "./common/ReentrancyGuard.sol";
 import "./interface/IXOLE.sol";
 import "./interface/IDexRouter.sol";
 
-contract OLERetroactiveReward is Adminable, ReentrancyGuard{
+contract RewardDistributor is Adminable, ReentrancyGuard{
     using TransferHelper for IERC20;
 
     struct Epoch {
@@ -42,7 +42,6 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
         uint256 withdraw;
         uint256 penalty;
         uint256 vestTime;
-        uint256 withdrawTime;
         bool converted;
         bool exited;
     }
@@ -76,21 +75,12 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
         uint256 len = _epochIds.length;
         require(len == _balances.length && len == _merkleProofs.length, "Mismatching inputs");
         for (uint256 i = 0; i < len; i ++) {
-            vest(account, _epochIds[i], _balances[i], _merkleProofs[i]);
+            _vest(account, _epochIds[i], _balances[i], _merkleProofs[i]);
         }
     }
 
     function vest(address account, uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) public nonReentrant {
-        require(_balance > 0, "Empty Balance");
-        require(_epochId < epochIdx, "Incorrect EpochId");
-        require(epochs[_epochId].startTime < block.timestamp, "Not Start");
-        require(epochs[_epochId].expireTime > block.timestamp, "Expire");
-        require(!vested[_epochId][account], "Already vested");
-        require(_verifyVest(account, epochs[_epochId].merkleRoot, _balance, _merkleProof), "Incorrect merkle proof");
-        vested[_epochId][account] = true;
-        epochs[_epochId].vested = epochs[_epochId].vested + _balance;
-        rewards[_epochId][account] = Reward(_balance, 0, 0, block.timestamp, block.timestamp, false, false);
-        emit Vested(_epochId, account, _balance, block.timestamp);
+        _vest(account, _epochId, _balance, _merkleProof);
     }
 
     function withdrawRewards(uint256[] calldata _epochIds, bool exit) external nonReentrant {
@@ -135,14 +125,13 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
 
     /*** Admin Functions ***/
     function newEpoch(bytes32 merkleRoot, uint256 total, uint256 startTime, uint256 expireTime) external onlyAdmin {
-        require(expireTime > block.timestamp, 'Incorrect expireTime');
-        uint epochId = epochIdx;
+        require(expireTime > startTime && expireTime > block.timestamp, 'Incorrect Time');
+        uint epochId = ++ epochIdx;
         epochs[epochId] = Epoch(merkleRoot, total, 0, 0, 0, 0, startTime, expireTime, config.defaultVestDuration, config.defaultExitPenaltyBase, config.defaultExitPenaltyAdd);
-        epochIdx = ++ epochIdx;
         emit EpochAdded(epochId, merkleRoot, total, startTime, expireTime, config.defaultVestDuration, config.defaultExitPenaltyBase, config.defaultExitPenaltyAdd);
     }
 
-    function withdrawExpired(uint256[] calldata _epochIds) external onlyAdmin {
+    function withdrawExpires(uint256[] calldata _epochIds) external onlyAdmin {
         uint256 expire;
         for (uint256 i = 0; i < _epochIds.length; i++) {
             Epoch storage epoch = epochs[_epochIds[i]];
@@ -181,6 +170,18 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
         config = _config;
     }
 
+    function _vest(address account, uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) internal {
+        require(_balance > 0, "Empty Balance");
+        require(epochs[_epochId].startTime < block.timestamp, "Not Start");
+        require(epochs[_epochId].expireTime > block.timestamp, "Expired");
+        require(!vested[_epochId][account], "Already vested");
+        require(_verifyVest(account, epochs[_epochId].merkleRoot, _balance, _merkleProof), "Incorrect merkle proof");
+        vested[_epochId][account] = true;
+        epochs[_epochId].vested = epochs[_epochId].vested + _balance;
+        rewards[_epochId][account] = Reward(_balance, 0, 0, block.timestamp, false, false);
+        emit Vested(_epochId, account, _balance, block.timestamp);
+    }
+
     function _verifyVest(address account, bytes32 root, uint256 _balance, bytes32[] memory _merkleProof) internal pure returns (bool valid) {
         bytes32 leaf = keccak256(abi.encodePacked(account, _balance));
         return MerkleProof.verify(_merkleProof, root, leaf);
@@ -189,7 +190,6 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
     function _withdrawReward(Reward storage reward, uint256 epochId, bool exit) internal rewardCheck(reward) returns (uint256){
         (uint256 withdraw, uint256 penalty) = _calWithdrawAndPenalty(reward, epochId, exit);
         require(withdraw > 0, "Withdraw Zero");
-        reward.withdrawTime = block.timestamp;
         reward.withdraw += withdraw;
         if (exit) {
             reward.exited = true;
@@ -208,10 +208,11 @@ contract OLERetroactiveReward is Adminable, ReentrancyGuard{
         Epoch memory epoch = epochs[epochId];
         uint256 endTime = reward.vestTime + epoch.vestDuration;
         uint256 calTime = block.timestamp > endTime ? endTime : block.timestamp;
-        withdraw = (calTime - reward.withdrawTime) * reward.reward / epoch.vestDuration;
+        uint256 releaseAble = (calTime - reward.vestTime) * reward.reward / epoch.vestDuration;
+        withdraw = releaseAble - reward.withdraw;
         if(exit && block.timestamp < endTime){
             uint256 penaltyFactor = (endTime - block.timestamp) * epoch.exitPenaltyAdd / epoch.vestDuration + epoch.exitPenaltyBase;
-            uint256 lock = (endTime - block.timestamp) * reward.reward / epoch.vestDuration;
+            uint256 lock = reward.reward - releaseAble;
             penalty = (lock * penaltyFactor) / PERCENT_DIVISOR;
             withdraw += lock - penalty;
         }

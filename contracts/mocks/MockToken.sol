@@ -4,6 +4,7 @@ pragma solidity 0.8.17;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 contract MockToken is ERC20 {
+
     constructor(
         string memory name_,
         string memory symbol_,
@@ -16,7 +17,7 @@ contract MockToken is ERC20 {
         _mint(to, amount);
     }
 
-    function getChainId() external view returns (uint256) {
-        return block.chainid;
+    function burn(address from, uint256 amount) public{
+        _burn(from, amount);
     }
 }
