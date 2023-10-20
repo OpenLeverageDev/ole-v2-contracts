@@ -46,6 +46,11 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
         bool exited;
     }
 
+    struct Withdraws {
+        uint256 withdraw;
+        uint256 penalty;
+    }
+
     uint256 internal constant PERCENT_DIVISOR = 10000;
     uint256 internal constant MAX_SLIPPAGE = 9000;
     IERC20 public oleToken;
@@ -118,9 +123,14 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
         return _verifyVest(account, epochs[_epochId].merkleRoot, _balance, _merkleProof);
     }
 
-    function calWithdrawAndPenalty(address account, uint256 _epochId, bool _exit) external view returns (uint256 withdraw, uint256 penalty){
-        Reward memory reward = rewards[_epochId][account];
-        return _calWithdrawAndPenalty(reward, _epochId, _exit);
+    function calWithdrawsAndPenalties(address account, uint256[] calldata _epochIds, bool _exit) external view returns (Withdraws[] memory results){
+        for (uint256 i = 0; i < _epochIds.length; i++) {
+            Reward memory reward = rewards[_epochIds[i]][account];
+            Withdraws memory item;
+            (item.withdraw, item.penalty) = _calWithdrawAndPenalty(reward, _epochIds[i], _exit);
+            results[i] = item;
+        }
+        return results;
     }
 
     /*** Admin Functions ***/
