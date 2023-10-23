@@ -7,9 +7,9 @@ import "./MockToken.sol";
 
 contract MockDexRouter {
 
-    uint public constant MINIMUM_LIQUIDITY = 10**3;
+    uint256 public constant MINIMUM_LIQUIDITY = 10**3;
     address public lpToken;
-    
+
     constructor (address _lpToken) {
         lpToken = _lpToken;
     }
@@ -33,44 +33,34 @@ contract MockDexRouter {
         uint256 amountA,
         uint256 amountB,
         uint256 liquidity
-    )
-    {
-        amountAMin;
-        amountBMin;
-        amountA = amountADesired;
-        amountB = amountBDesired;
-        liquidity = sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
-        MockToken(lpToken).mint(to, liquidity);
+    ){
+        uint256 reserveA = IERC20(tokenA).balanceOf(address(this));
+        uint256 reserveB = IERC20(tokenB).balanceOf(address(this));
+        uint256 amountBOptimal = quote(amountADesired, reserveA, reserveB);
+        if (amountBOptimal <= amountBDesired) {
+            require(amountBOptimal >= amountBMin, "PancakeRouter: INSUFFICIENT_B_AMOUNT");
+            (amountA, amountB) = (amountADesired, amountBOptimal);
+        } else {
+            uint256 amountAOptimal = quote(amountBDesired, reserveB, reserveA);
+            assert(amountAOptimal <= amountADesired);
+            require(amountAOptimal >= amountAMin, "PancakeRouter: INSUFFICIENT_A_AMOUNT");
+            (amountA, amountB) = (amountAOptimal, amountBDesired);
+        }
         MockToken(tokenA).transferFrom(msg.sender, address(this), amountA);
         MockToken(tokenB).transferFrom(msg.sender, address(this), amountB);
+        liquidity = sqrt(amountA * amountB) - MINIMUM_LIQUIDITY;
+        MockToken(lpToken).mint(to, liquidity);
         emit AddLiquidity(tokenA, tokenB, amountADesired, amountBDesired);
     }
 
-    function removeLiquidity(
-        address tokenA,
-        address tokenB,
-        uint256 liquidity,
-        uint256 amountAMin,
-        uint256 amountBMin,
-        address to,
-        uint256 deadline
-    )
-    external
-    virtual
-    ensure(deadline)
-    returns (
+    function quote(
         uint256 amountA,
-        uint256 amountB
-    ) {
-        MockToken(lpToken).burn(msg.sender, liquidity);
-        uint tokenABalance = IERC20(tokenA).balanceOf(address(this));
-        uint tokenBBalance = IERC20(tokenB).balanceOf(address(this));
-        require(tokenABalance >= amountAMin, "UniswapRouter: INSUFFICIENT_A_AMOUNT");
-        require(tokenBBalance >= amountBMin, "UniswapRouter: INSUFFICIENT_B_AMOUNT");
-        MockToken(tokenA).transfer(to, tokenABalance);
-        MockToken(tokenB).transfer(to, tokenBBalance);
-        amountA = tokenABalance;
-        amountB = tokenBBalance;
+        uint256 reserveA,
+        uint256 reserveB
+    ) internal pure returns (uint256 amountB) {
+        require(amountA > 0, "PancakeLibrary: INSUFFICIENT_AMOUNT");
+        require(reserveA > 0 && reserveB > 0, "PancakeLibrary: INSUFFICIENT_LIQUIDITY");
+        amountB = amountA * reserveB / reserveA;
     }
 
     modifier ensure(uint deadline) {

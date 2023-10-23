@@ -124,7 +124,9 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
     }
 
     function calWithdrawsAndPenalties(address account, uint256[] calldata _epochIds, bool _exit) external view returns (Withdraws[] memory results){
-        for (uint256 i = 0; i < _epochIds.length; i++) {
+        uint len = _epochIds.length;
+        results = new Withdraws[](len);
+        for (uint256 i = 0; i < len; i++) {
             Reward memory reward = rewards[_epochIds[i]][account];
             Withdraws memory item;
             (item.withdraw, item.penalty) = _calWithdrawAndPenalty(reward, _epochIds[i], _exit);
@@ -238,7 +240,7 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
     /// @param slippage 9900 is 1%
     function _convertToXOLE(uint oleAmount, uint256 token1Amount, uint256 slippage, uint256 unlockTime) internal {
         require(oleAmount > 0 && token1Amount > 0, "Empty Amount");
-        require(slippage > MAX_SLIPPAGE, "Slip Too High");
+        require(slippage >= MAX_SLIPPAGE && slippage <= PERCENT_DIVISOR, "Slip ERR");
         (uint256 amount, uint256 end) = IXOLE(config.xole).locked(msg.sender);
         if(amount > 0){
             unlockTime = end;
@@ -257,8 +259,8 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
         uint256 max = token1Amount * PERCENT_DIVISOR / slippage;
         uint256 min = token1Amount * slippage / PERCENT_DIVISOR;
         IERC20(config.token1).safeTransferFrom(msg.sender, address(this), max);
-        oleToken.safeApprove(config.dexRouter, oleAmount);
         IERC20(config.token1).safeApprove(config.dexRouter, max);
+        oleToken.safeApprove(config.dexRouter, oleAmount);
         uint256 amountA;
         uint256 amountB;
         (amountA, amountB, liquidity) = IDexRouter(config.dexRouter).addLiquidity(address(oleToken), config.token1, oleAmount, max, oleAmount, min, address(this), block.timestamp);
