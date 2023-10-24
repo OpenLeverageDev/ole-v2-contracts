@@ -26,7 +26,6 @@ The `OLEV1Lock` contract plays a crucial role in this project. It was developed 
 
 - **Events**: The contract emits a `Locked` event whenever a user locks their tokens, providing transparency and traceability during the upgrade.
 
-
 ### OLEV2Swap Contract
 
 The `OLEV2Swap` contract is a key component of the OLE Token upgrade project. It facilitates the swapping of OLEV1 Tokens to the OLEV2 Tokens. Here's a brief description of the contract:
@@ -38,6 +37,28 @@ The `OLEV2Swap` contract is a key component of the OLE Token upgrade project. It
 - **Expiration Time**: The contract includes an expiration time (as set during deployment) to prevent swaps after the specified date.
 
 - **Events**: The contract emits a `Swapped` event when a user successfully swaps their tokens, providing transparency and traceability.
+
+### RewardVault Contract
+
+The `RewardVault` contract  is a versatile infrastructure that allows users and projects to supply rewards in the form of tokens to incentivize trading, lending, and borrowing activities. Users can claim these rewards, and the contract supports multiple tokens and campaigns in a single transaction.
+
+- **Adding Tranches**: Users or projects can create reward tranches by supplying tokens. Tranches are defined by start and end times, the total amount of tokens to be distributed is specified when adding a tranche.
+
+- **Updating Tranches**: The provider of a tranche can update its start and end times, as well as add more tokens before the distribution begins.
+
+- **Recycling Rewards**: Tranche providers can recycle undistributed and unclaimed rewards. If rewards expire and are unclaimed, they can be recycled.
+
+- **Claiming Rewards**: Users can claim their rewards from tranches using Merkle tree proofs, ensuring that they received their entitled share of rewards.
+
+### RewardDistributor Contract
+
+The `RewardDistributor` contract is a part of the OpenLeverage protocol. It is responsible for distributing rewards to users for each epoch of Ole reward issuance. Users can vest their rewards, withdraw them, or convert them into XOLE tokens. The contract also enforces vesting time, exit penalties, and supports advanced features such as early reward conversion.
+
+- **Vests**: Users can vest their rewards for a specific epoch. This is done using the `vest` or `vests` function, where they specify the epoch, balance, and provide a valid Merkle proof.
+
+- **Withdraw Rewards**: Users can withdraw their vested rewards using the `withdrawReward` or `withdrawRewards` function. They can also choose to exit early with a penalty.
+
+- **Convert to XOLE**: Users can convert their rewards into XOLE tokens using the `convertToXOLE` or `convertToXOLEs` function, provided they meet certain conditions.
 
 
 ## Getting Started

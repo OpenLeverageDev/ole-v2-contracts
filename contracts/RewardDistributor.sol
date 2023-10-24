@@ -76,7 +76,7 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
     event PenaltyWithdrew(uint256 epochId, uint penalty);
 
 
-    function vests(address account, uint256[] calldata _epochIds, uint256[] calldata _balances, bytes32[][] calldata _merkleProofs) external nonReentrant{
+    function vests(address account, uint256[] calldata _epochIds, uint256[] calldata _balances, bytes32[][] calldata _merkleProofs) external{
         uint256 len = _epochIds.length;
         require(len == _balances.length && len == _merkleProofs.length, "Mismatching inputs");
         for (uint256 i = 0; i < len; i ++) {
@@ -84,11 +84,11 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
         }
     }
 
-    function vest(address account, uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) public nonReentrant {
+    function vest(address account, uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) external {
         _vest(account, _epochId, _balance, _merkleProof);
     }
 
-    function withdrawRewards(uint256[] calldata _epochIds, bool exit) external nonReentrant {
+    function withdrawRewards(uint256[] calldata _epochIds, bool exit) external {
         uint256 totalWithdraw;
         for (uint256 i = 0; i < _epochIds.length; i++) {
             Reward storage reward = rewards[_epochIds[i]][msg.sender];
@@ -97,13 +97,13 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
         oleToken.safeTransfer(msg.sender, totalWithdraw);
     }
 
-    function withdrawReward(uint256 epochId, bool exit) external nonReentrant {
+    function withdrawReward(uint256 epochId, bool exit) external {
         Reward storage reward = rewards[epochId][msg.sender];
         uint256 withdraw = _withdrawReward(reward, epochId, exit);
         oleToken.safeTransfer(msg.sender, withdraw);
     }
 
-    function convertToXOLEs(uint256[] calldata _epochIds, uint256 token1Amount, uint256 slippage, uint256 unlockTime) external nonReentrant {
+    function convertToXOLEs(uint256[] calldata _epochIds, uint256 token1Amount, uint256 slippage, uint256 unlockTime) external {
         uint256 totalConversion;
         for (uint256 i = 0; i < _epochIds.length; i++) {
             totalConversion += _getConvertOLE(_epochIds[i], rewards[_epochIds[i]][msg.sender]);
@@ -114,7 +114,7 @@ contract RewardDistributor is Adminable, ReentrancyGuard{
     /// @param token1Amount, The token1Amount of lp token1 for add liquidity
     /// @param slippage, The slippage for token1 when adding liquidity
     /// @param unlockTime, The unlock time for the XOLE lock
-    function convertToXOLE(uint256 epochId, uint256 token1Amount, uint256 slippage, uint256 unlockTime) external nonReentrant{
+    function convertToXOLE(uint256 epochId, uint256 token1Amount, uint256 slippage, uint256 unlockTime) external {
         uint256 conversion = _getConvertOLE(epochId, rewards[epochId][msg.sender]);
         _convertToXOLE(conversion, token1Amount, slippage, unlockTime);
     }

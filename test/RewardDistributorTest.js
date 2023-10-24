@@ -21,7 +21,7 @@ contract("OLE reward distributor", async accounts => {
     let defaultExitPenaltyBase = 2000;
     let defaultExitPenaltyAdd = 6000;
 
-    // merkle tree const=
+    // merkle tree const
     let admin = accounts[0];
     let user1 = accounts[1];
     let user2 = accounts[2];
