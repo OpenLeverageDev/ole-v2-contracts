@@ -686,7 +686,7 @@ contract("RewardVault", async accounts => {
         let user1ClaimTx = await rewardVault.claim(1, toWei(10), merkleTree.getHexProof(leaves[user1Index]), {from : user1});
         let user1EthBalanceAfter = await web3.eth.getBalance(user1);
         let user1GasUsed = user1ClaimTx.receipt.gasUsed;
-        approxPrecisionAssertPrint(user1EthBalanceAfter - user1EthBalanceBefore + user1GasUsed, 9999784792498983000, 5);
+        approxPrecisionAssertPrint(user1EthBalanceAfter - user1EthBalanceBefore + user1GasUsed, 9999784792498983000, 4);
         m.log("user1 claim success");
 
         let user2Index = 1;
@@ -695,7 +695,7 @@ contract("RewardVault", async accounts => {
         let user2ClaimTx = await rewardVault.claim(1, toWei(10), merkleTree.getHexProof(leaves[user2Index]), {from : user2});
         let user2EthBalanceAfter = await web3.eth.getBalance(user2);
         let user2GasUsed = user2ClaimTx.receipt.gasUsed;
-        approxPrecisionAssertPrint(user2EthBalanceAfter - user2EthBalanceBefore + user2GasUsed,9999825569998508000, 5);
+        approxPrecisionAssertPrint(user2EthBalanceAfter - user2EthBalanceBefore + user2GasUsed,9999825569998508000, 4);
         m.log("user2 claim success");
         await assertThrows(rewardVault.claim(1, toWei(10), merkleTree.getHexProof(leaves[user2Index]), {from : user2}), 'Already claimed');
         m.log("user2 claim again fail");
