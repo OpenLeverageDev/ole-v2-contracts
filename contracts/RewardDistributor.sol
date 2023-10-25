@@ -7,276 +7,287 @@ import "./libraries/TransferHelper.sol";
 import "./common/Adminable.sol";
 import "./common/ReentrancyGuard.sol";
 import "./interface/IXOLE.sol";
-import "./interface/IDexRouter.sol";
+import "./interface/IUniV2ClassPair.sol";
 
 contract RewardDistributor is Adminable, ReentrancyGuard{
     using TransferHelper for IERC20;
+    using TransferHelper for IUniV2ClassPair;
+
+    error InvalidAmount();
+    error InvalidTime();
+    error NotStart();
+    error Expired();
+    error NotExpired();
+    error AlreadyRecycled();
+    error AlreadyVested();
+    error IncorrectMerkleProof();
+    error ExceedMax(uint256 amount);
 
     struct Epoch {
         bytes32 merkleRoot;
         uint256 total;
         uint256 vested;
-        uint256 penalty;
-        uint256 expireWithdrew;
-        uint256 penaltyWithdrew;
         uint256 startTime; // vest start time
         uint256 expireTime; // vest expire time
-        uint256 vestDuration;
-        uint16 exitPenaltyBase;
-        uint16 exitPenaltyAdd;
-    }
-
-    struct Config {
-        address token1;  // token1 of lp
-        address xole;
-        address lpToken;
-        address dexRouter;
-        uint256 minXOLELockTime;
-        uint256 defaultVestDuration;  // default vest duration
-        uint16 defaultExitPenaltyBase;  // exit penalty base percentage, 2000 => 20%
-        uint16 defaultExitPenaltyAdd;  //  exit penalty add percentage, 6000 => 60%
+        uint256 vestDuration; // vest duration, in seconds
+        uint16 penaltyBase; // exit penalty base percentage, 2000 => 20%
+        uint16 penaltyAdd; // exit penalty add percentage, 6000 => 60%
+        bool recycled;
     }
 
     struct Reward {
-        uint256 reward;
-        uint256 withdraw;
-        uint256 penalty;
-        uint256 vestTime;
-        bool converted;
-        bool exited;
-    }
-
-    struct Withdraws {
-        uint256 withdraw;
-        uint256 penalty;
+        uint256 amount; // total amount to be vested
+        uint256 withdrawn; // withdrawn amount by the user
+        uint256 vestStartTime; // vest start time
     }
 
     uint256 internal constant PERCENT_DIVISOR = 10000;
-    uint256 internal constant MAX_SLIPPAGE = 9000;
-    IERC20 public oleToken;
-    Config public config;
-    uint256 public epochIdx;
-    mapping(uint256 => mapping(address => Reward)) public rewards; // Mapping of epoch to user's rewards
-    mapping(uint256 => Epoch) public epochs;  // Mapping of epoch info
-    mapping(uint256 => mapping(address => bool)) public vested; // Mapping of epoch to user's vests
+    uint256 constant WEEK = 7 * 86400;  // XOLE lock times are rounded by week
+    uint256 constant MIN_DURATION = 7 * 86400;  // 7 days
+    uint256 constant MAX_DURATION = 4 * 365 * 86400;  // 4 years
 
-    constructor(address _oleToken, Config memory _config) {
+    IERC20 public immutable oleToken;
+    IUniV2ClassPair public immutable pair;
+    address public immutable token1;  // token1 of lp
+    address public immutable xole;
+    uint256 public epochIdx;
+    uint256 public minXOLELockDuration; // min XOLE lock duration in seconds when converting
+    uint256 public withdrawablePenalty; // the withdrawable penalty for admin
+
+    // mapping of epochId, user to reward info
+    mapping(uint256 => mapping(address => Reward)) public rewards;
+    // mapping of epochId to epoch info
+    mapping(uint256 => Epoch) public epochs;
+
+    constructor(address _oleToken, address _pair, address _token1, address _xole, uint256 _minXOLELockDuration) verifyDuration(_minXOLELockDuration){
         oleToken = IERC20(_oleToken);
-        config = _config;
+        pair = IUniV2ClassPair(_pair);
+        token1 = _token1;
+        xole = _xole;
+        minXOLELockDuration = _minXOLELockDuration;
         admin = payable(msg.sender);
     }
 
-    event Vested(uint256 epochId, address account, uint256 balance, uint256 vestTime);
-    event RewardWithdrew(uint256 epochId, address account, uint withdraw);
-    event RewardExited(uint256 epochId, address account, uint penalty);
-    event RewardConverted(uint256 epochId, address account, uint convert);
+    event VestStarted(uint256 epochId, address account, uint256 balance, uint256 vestTime);
+    event Withdrawn(uint256 epochId, address account, uint amount, uint penalty);
+    event ConvertedToXOLE(uint256 epochId, address account, uint amount);
 
-    event EpochAdded(uint256 epochId, bytes32 merkleRoot, uint256 total, uint256 startTime, uint256 expireTime, uint256 vestDuration, uint16 unlockPenaltyBase, uint16 unlockPenaltyAdd);
-    event ExpiredWithdrew(uint256 epochId, uint expire);
-    event PenaltyWithdrew(uint256 epochId, uint penalty);
+    event EpochAdded(uint256 epochId, bytes32 merkleRoot, uint256 total, uint256 startTime, uint256 expireTime, uint256 vestDuration, uint16 penaltyBase, uint16 penaltyAdd);
+    event Recycled(uint256 epochId, uint256 recycledAmount);
+    event PenaltyWithdrawn(uint256 amount);
 
-
-    function vests(address account, uint256[] calldata _epochIds, uint256[] calldata _balances, bytes32[][] calldata _merkleProofs) external{
-        uint256 len = _epochIds.length;
-        require(len == _balances.length && len == _merkleProofs.length, "Mismatching inputs");
-        for (uint256 i = 0; i < len; i ++) {
-            _vest(account, _epochIds[i], _balances[i], _merkleProofs[i]);
-        }
+    function vest(uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) external {
+        if (_balance == 0) revert InvalidAmount();
+        if(block.timestamp < epochs[_epochId].startTime) revert NotStart();
+        if(block.timestamp > epochs[_epochId].expireTime) revert Expired();
+        Reward memory reward = rewards[_epochId][msg.sender];
+        if(reward.amount > 0) revert AlreadyVested();
+        if(!_verifyVest(msg.sender, epochs[_epochId].merkleRoot, _balance, _merkleProof)) revert IncorrectMerkleProof();
+        epochs[_epochId].vested += _balance;
+        rewards[_epochId][msg.sender] = Reward(_balance, 0, block.timestamp);
+        emit VestStarted(_epochId, msg.sender, _balance, block.timestamp);
     }
 
-    function vest(address account, uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) external {
-        _vest(account, _epochId, _balance, _merkleProof);
-    }
-
-    function withdrawRewards(uint256[] calldata _epochIds, bool exit) external {
-        uint256 totalWithdraw;
+    function withdrawMul(uint256[] calldata _epochIds) external {
+        uint256 total;
         for (uint256 i = 0; i < _epochIds.length; i++) {
-            Reward storage reward = rewards[_epochIds[i]][msg.sender];
-            totalWithdraw += _withdrawReward(reward, _epochIds[i], exit);
+            total += _withdrawReward(_epochIds[i]);
         }
-        oleToken.safeTransfer(msg.sender, totalWithdraw);
+        oleToken.safeTransfer(msg.sender, total);
     }
 
-    function withdrawReward(uint256 epochId, bool exit) external {
+    function withdraw(uint256 epochId) external {
+        uint256 withdrawn = _withdrawReward(epochId);
+        oleToken.safeTransfer(msg.sender, withdrawn);
+    }
+
+    function earlyExit(uint256 epochId) external {
         Reward storage reward = rewards[epochId][msg.sender];
-        uint256 withdraw = _withdrawReward(reward, epochId, exit);
-        oleToken.safeTransfer(msg.sender, withdraw);
+        if(reward.amount == reward.withdrawn) revert InvalidAmount();
+        (uint256 withdrawn, uint256 penalty) = _earlyExitWithdrawable(reward, epochId);
+        reward.withdrawn = reward.amount;
+        withdrawablePenalty += penalty;
+        emit Withdrawn(epochId, msg.sender, withdrawn, penalty);
+        oleToken.safeTransfer(msg.sender, withdrawn);
     }
 
-    function convertToXOLEs(uint256[] calldata _epochIds, uint256 token1Amount, uint256 slippage, uint256 unlockTime) external {
-        uint256 totalConversion;
-        for (uint256 i = 0; i < _epochIds.length; i++) {
-            totalConversion += _getConvertOLE(_epochIds[i], rewards[_epochIds[i]][msg.sender]);
-        }
-        _convertToXOLE(totalConversion, token1Amount, slippage, unlockTime);
-    }
-
-    /// @param token1Amount, The token1Amount of lp token1 for add liquidity
-    /// @param slippage, The slippage for token1 when adding liquidity
+    /// @param token1MaxAmount, The token1 max supply amount when adding liquidity
     /// @param unlockTime, The unlock time for the XOLE lock
-    function convertToXOLE(uint256 epochId, uint256 token1Amount, uint256 slippage, uint256 unlockTime) external {
-        uint256 conversion = _getConvertOLE(epochId, rewards[epochId][msg.sender]);
-        _convertToXOLE(conversion, token1Amount, slippage, unlockTime);
+    function convertToNewXole(uint256 epochId, uint256 token1MaxAmount, uint256 unlockTime) external nonReentrant{
+        uint256 conversion = _convertOLE(epochId, msg.sender);
+        _convertToNewXole(msg.sender, conversion, token1MaxAmount, unlockTime);
     }
 
+    function convertToNewXoleForOthers(uint256 epochId, address account, uint256 token1MaxAmount, uint256 unlockTime) external nonReentrant{
+        uint256 conversion = _convertOLE(epochId, msg.sender);
+        _convertToNewXole(account, conversion, token1MaxAmount, unlockTime);
+    }
+
+    function convertAndIncreaseXoleAmount(uint256 epochId, uint256 token1MaxAmount) external nonReentrant{
+        uint256 conversion = _convertOLE(epochId, msg.sender);
+        _convertAndIncreaseXoleAmount(msg.sender, conversion, token1MaxAmount);
+    }
+
+    function convertAndIncreaseXoleAmountForOthers(uint256 epochId, address account, uint256 token1MaxAmount) external nonReentrant{
+        uint256 conversion = _convertOLE(epochId, msg.sender);
+        _convertAndIncreaseXoleAmount(account, conversion, token1MaxAmount);
+    }
+
+    /*** View Functions ***/
     function verifyVest(address account, uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) external view returns (bool valid){
         return _verifyVest(account, epochs[_epochId].merkleRoot, _balance, _merkleProof);
     }
 
-    function calWithdrawsAndPenalties(address account, uint256[] calldata _epochIds, bool _exit) external view returns (Withdraws[] memory results){
+    function getWithdrawable(address account, uint256[] calldata _epochIds) external view returns (uint256[] memory results){
         uint len = _epochIds.length;
-        results = new Withdraws[](len);
+        results = new uint256[](len);
         for (uint256 i = 0; i < len; i++) {
             Reward memory reward = rewards[_epochIds[i]][account];
-            Withdraws memory item;
-            (item.withdraw, item.penalty) = _calWithdrawAndPenalty(reward, _epochIds[i], _exit);
-            results[i] = item;
+            if(reward.amount == reward.withdrawn) {
+                results[i] = 0;
+                continue;
+            }
+            Epoch memory epoch = epochs[_epochIds[i]];
+            uint256 releaseAble = _releaseAble(reward, epoch);
+            results[i] = releaseAble - reward.withdrawn;
         }
-        return results;
+    }
+
+    function getEarlyExitWithdrawable(address account, uint256 _epochId) external view returns (uint256 amount, uint256 penalty){
+        Reward memory reward = rewards[_epochId][account];
+        if(reward.amount == reward.withdrawn) {
+            (amount, penalty) = (0, 0);
+        } else {
+            (amount, penalty) = _earlyExitWithdrawable(reward, _epochId);
+        }
     }
 
     /*** Admin Functions ***/
-    function newEpoch(bytes32 merkleRoot, uint256 total, uint256 startTime, uint256 expireTime) external onlyAdmin {
-        require(expireTime > startTime && expireTime > block.timestamp, 'Incorrect Time');
+    function newEpoch(
+        bytes32 merkleRoot,
+        uint256 total,
+        uint256 startTime,
+        uint256 expireTime,
+        uint256 vestDuration,
+        uint16 penaltyBase,
+        uint16 penaltyAdd)
+    external onlyAdmin verifyDuration(vestDuration) {
+        if(expireTime <= startTime || expireTime <= block.timestamp) revert InvalidTime();
+        if(total == 0 || penaltyBase > PERCENT_DIVISOR || penaltyAdd > PERCENT_DIVISOR) revert InvalidAmount();
         uint epochId = ++ epochIdx;
-        epochs[epochId] = Epoch(merkleRoot, total, 0, 0, 0, 0, startTime, expireTime, config.defaultVestDuration, config.defaultExitPenaltyBase, config.defaultExitPenaltyAdd);
-        emit EpochAdded(epochId, merkleRoot, total, startTime, expireTime, config.defaultVestDuration, config.defaultExitPenaltyBase, config.defaultExitPenaltyAdd);
+        epochs[epochId] = Epoch(merkleRoot, total, 0, startTime, expireTime, vestDuration, penaltyBase, penaltyAdd, false);
+        emit EpochAdded(epochId, merkleRoot, total, startTime, expireTime, vestDuration, penaltyBase, penaltyAdd);
     }
 
-    function withdrawExpires(uint256[] calldata _epochIds) external onlyAdmin {
-        uint256 expire;
+    function recycle(uint256[] calldata _epochIds) external onlyAdmin {
+        uint256 total;
         for (uint256 i = 0; i < _epochIds.length; i++) {
             Epoch storage epoch = epochs[_epochIds[i]];
-            require(block.timestamp > epoch.expireTime, 'Not Expire');
-            uint256 withdraw = epoch.total - epoch.vested - epoch.expireWithdrew;
-            if (withdraw == 0){
-                continue;
-            }
-            expire += withdraw;
-            epoch.expireWithdrew += withdraw;
-            emit ExpiredWithdrew(_epochIds[i], withdraw);
+            if(epoch.recycled) revert AlreadyRecycled();
+            if(block.timestamp <= epoch.expireTime) revert NotExpired();
+            uint256 recycleAmount = epoch.total - epoch.vested;
+            total += recycleAmount;
+            epoch.recycled = true;
+            emit Recycled(_epochIds[i], recycleAmount);
         }
-        if (expire > 0) {
-            oleToken.safeTransfer(admin, expire);
-        }
+        if(total == 0) revert InvalidAmount();
+        oleToken.safeTransfer(admin, total);
     }
 
-    function withdrawPenalties(uint256[] calldata _epochIds) external onlyAdmin {
-        uint256 penalty;
-        for (uint256 i = 0; i < _epochIds.length; i++) {
-            Epoch storage epoch = epochs[_epochIds[i]];
-            uint256 withdraw = epoch.penalty - epoch.penaltyWithdrew;
-            if (withdraw == 0){
-                continue;
-            }
-            penalty += withdraw;
-            epoch.penaltyWithdrew += withdraw;
-            emit PenaltyWithdrew(_epochIds[i], withdraw);
-        }
-        if (penalty > 0) {
-            oleToken.safeTransfer(admin, penalty);
-        }
+    function withdrawPenalty() external onlyAdmin {
+        if(withdrawablePenalty == 0) revert InvalidAmount();
+        uint256 _withdrawablePenalty = withdrawablePenalty;
+        withdrawablePenalty = 0;
+        oleToken.safeTransfer(admin, _withdrawablePenalty);
+        emit PenaltyWithdrawn(_withdrawablePenalty);
     }
 
-    function setConfig(Config memory _config) external onlyAdmin {
-        config = _config;
+    function setMinXOLELockDuration(uint256 _minXOLELockDuration) external onlyAdmin verifyDuration(_minXOLELockDuration){
+        minXOLELockDuration = _minXOLELockDuration;
     }
 
-    function _vest(address account, uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) internal {
-        require(_balance > 0, "Empty Balance");
-        require(epochs[_epochId].startTime < block.timestamp, "Not Start");
-        require(epochs[_epochId].expireTime > block.timestamp, "Expired");
-        require(!vested[_epochId][account], "Already vested");
-        require(_verifyVest(account, epochs[_epochId].merkleRoot, _balance, _merkleProof), "Incorrect merkle proof");
-        vested[_epochId][account] = true;
-        epochs[_epochId].vested = epochs[_epochId].vested + _balance;
-        rewards[_epochId][account] = Reward(_balance, 0, 0, block.timestamp, false, false);
-        emit Vested(_epochId, account, _balance, block.timestamp);
-    }
-
+    /*** Internal Functions ***/
     function _verifyVest(address account, bytes32 root, uint256 _balance, bytes32[] memory _merkleProof) internal pure returns (bool valid) {
         bytes32 leaf = keccak256(abi.encodePacked(account, _balance));
         return MerkleProof.verify(_merkleProof, root, leaf);
     }
 
-    function _withdrawReward(Reward storage reward, uint256 epochId, bool exit) internal rewardCheck(reward) returns (uint256){
-        (uint256 withdraw, uint256 penalty) = _calWithdrawAndPenalty(reward, epochId, exit);
-        require(withdraw > 0, "Withdraw Zero");
-        reward.withdraw += withdraw;
-        if (exit) {
-            reward.exited = true;
-            reward.penalty = penalty;
-            epochs[epochId].penalty += penalty;
-            emit RewardExited(epochId, msg.sender, penalty);
-        }
-        emit RewardWithdrew(epochId, msg.sender, withdraw);
-        return withdraw;
-    }
-
-    function _calWithdrawAndPenalty(Reward memory reward, uint256 epochId, bool exit) internal view returns (uint256 withdraw, uint256 penalty) {
-        if (reward.converted || reward.exited) {
-            return (0, 0);
-        }
+    function _withdrawReward(uint256 epochId) internal returns (uint256){
+        Reward storage reward = rewards[epochId][msg.sender];
+        if(reward.amount == reward.withdrawn) revert InvalidAmount();
         Epoch memory epoch = epochs[epochId];
-        uint256 endTime = reward.vestTime + epoch.vestDuration;
+        uint256 withdrawn = _releaseAble(reward, epoch) - reward.withdrawn;
+        if(withdrawn == 0) revert InvalidAmount();
+        reward.withdrawn += withdrawn;
+        emit Withdrawn(epochId, msg.sender, withdrawn, 0);
+        return withdrawn;
+    }
+
+    function _releaseAble(Reward memory reward, Epoch memory epoch) internal view returns (uint256) {
+        uint256 endTime = reward.vestStartTime + epoch.vestDuration;
         uint256 calTime = block.timestamp > endTime ? endTime : block.timestamp;
-        uint256 releaseAble = (calTime - reward.vestTime) * reward.reward / epoch.vestDuration;
-        withdraw = releaseAble - reward.withdraw;
-        if(exit && block.timestamp < endTime){
-            uint256 penaltyFactor = (endTime - block.timestamp) * epoch.exitPenaltyAdd / epoch.vestDuration + epoch.exitPenaltyBase;
-            uint256 lock = reward.reward - releaseAble;
-            penalty = (lock * penaltyFactor) / PERCENT_DIVISOR;
-            withdraw += lock - penalty;
-        }
+        return (calTime - reward.vestStartTime) * reward.amount / epoch.vestDuration;
     }
 
-    function _getConvertOLE(uint256 epochId, Reward storage reward) internal rewardCheck(reward) returns (uint256) {
-        uint oleAmount = reward.reward - reward.withdraw;
-        reward.converted = true;
-        emit RewardConverted(epochId, msg.sender, oleAmount);
-        return oleAmount;
+    function _earlyExitWithdrawable(Reward memory reward, uint256 epochId) internal view returns (uint256 withdrawable, uint256 penalty) {
+        Epoch memory epoch = epochs[epochId];
+        uint256 releaseAble =_releaseAble(reward, epoch);
+        withdrawable = releaseAble - reward.withdrawn;
+        // cal penalty
+        uint256 endTime = reward.vestStartTime + epoch.vestDuration;
+        uint256 penaltyFactor = (endTime - block.timestamp) * epoch.penaltyAdd / epoch.vestDuration + epoch.penaltyBase;
+        uint256 lock = reward.amount - releaseAble;
+        penalty = (lock * penaltyFactor) / PERCENT_DIVISOR;
+        withdrawable += lock - penalty;
+        return (withdrawable, penalty);
     }
 
-    /// @param slippage 9900 is 1%
-    function _convertToXOLE(uint oleAmount, uint256 token1Amount, uint256 slippage, uint256 unlockTime) internal {
-        require(oleAmount > 0 && token1Amount > 0, "Empty Amount");
-        require(slippage >= MAX_SLIPPAGE && slippage <= PERCENT_DIVISOR, "Slip ERR");
-        (uint256 amount, uint256 end) = IXOLE(config.xole).locked(msg.sender);
-        if(amount > 0){
-            unlockTime = end;
-        }
-        require(unlockTime >= block.timestamp + config.minXOLELockTime, "Lock Time ERR");
-        uint256 liquidity = getLp(oleAmount, token1Amount, slippage);
-        IERC20(config.lpToken).safeApprove(config.xole, liquidity);
-        if (amount > 0){
-            IXOLE(config.xole).increase_amount_for(msg.sender, liquidity);
-        } else {
-            IXOLE(config.xole).create_lock_for(msg.sender, liquidity, unlockTime);
-        }
+    function _convertOLE(uint256 epochId, address account) internal returns (uint256) {
+        Reward storage reward = rewards[epochId][account];
+        uint convertible = reward.amount - reward.withdrawn;
+        if(convertible == 0) revert InvalidAmount();
+        reward.withdrawn = reward.amount;
+        emit ConvertedToXOLE(epochId, account, convertible);
+        return convertible;
+    }
+    
+    function _convertToNewXole(address account, uint oleAmount, uint256 token1MaxAmount, uint256 unlockTime) internal {
+        unlockTime = unlockTime / WEEK * WEEK;
+        verifyUnlockTime(unlockTime);
+        uint256 liquidity = formLp(oleAmount, token1MaxAmount);
+        pair.safeApprove(xole, liquidity);
+        IXOLE(xole).create_lock_for(account, liquidity, unlockTime);
+    }
+    
+    function _convertAndIncreaseXoleAmount(address account, uint oleAmount, uint256 token1MaxAmount) internal {
+        (,uint256 lockTime) = IXOLE(xole).locked(account);
+        verifyUnlockTime(lockTime);
+        uint256 liquidity = formLp(oleAmount, token1MaxAmount);
+        pair.safeApprove(xole, liquidity);
+        IXOLE(xole).increase_amount_for(account, liquidity);
     }
 
-    function getLp(uint oleAmount, uint256 token1Amount, uint256 slippage) internal returns (uint256 liquidity){
-        uint256 max = token1Amount * PERCENT_DIVISOR / slippage;
-        uint256 min = token1Amount * slippage / PERCENT_DIVISOR;
-        IERC20(config.token1).safeTransferFrom(msg.sender, address(this), max);
-        IERC20(config.token1).safeApprove(config.dexRouter, max);
-        oleToken.safeApprove(config.dexRouter, oleAmount);
-        uint256 amountA;
-        uint256 amountB;
-        (amountA, amountB, liquidity) = IDexRouter(config.dexRouter).addLiquidity(address(oleToken), config.token1, oleAmount, max, oleAmount, min, address(this), block.timestamp);
-        oleToken.safeApprove(config.dexRouter, 0);
-        IERC20(config.token1).safeApprove(config.dexRouter, 0);
-        // return remain token1 fund to msg.sender
-        uint remain = max - amountB;
-        if(remain > 0) {
-            IERC20(config.token1).safeTransfer(msg.sender, remain);
-        }
+    function formLp(uint oleAmount, uint256 token1MaxAmount) internal returns (uint256 liquidity){
+        (uint256 reserveA, uint256 reserveB) = getReserves(address(oleToken), token1);
+        uint256 amountBOptimal = oleAmount * reserveB / reserveA;
+        if(amountBOptimal > token1MaxAmount) revert ExceedMax(amountBOptimal);
+        IERC20(token1).safeTransferFrom(msg.sender, address(pair), amountBOptimal);
+        oleToken.safeTransfer(address(pair), oleAmount);
+        liquidity = pair.mint(address(this));
     }
 
-    modifier rewardCheck(Reward memory reward) {
-        require(!reward.converted, "Converted");
-        require(!reward.exited, "Exited");
-        require(reward.reward - reward.withdraw > 0, "Empty Withdraw");
+    function getReserves(address tokenA, address tokenB) internal view returns (uint256 reserveA, uint256 reserveB) {
+        (uint256 reserve0, uint256 reserve1,) = pair.getReserves();
+        (address _token0,) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        (reserveA, reserveB) = tokenA == _token0 ? (reserve0, reserve1) : (reserve1, reserve0);
+    }
+
+    function verifyUnlockTime(uint256 _unlockTime) internal view {
+        if (_unlockTime < block.timestamp + minXOLELockDuration || _unlockTime > block.timestamp + MAX_DURATION) revert InvalidTime();
+    }
+
+    modifier verifyDuration(uint256 _duration) {
+        if(_duration < MIN_DURATION || _duration > MAX_DURATION) revert InvalidTime();
         _;
     }
 

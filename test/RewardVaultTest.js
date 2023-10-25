@@ -2,7 +2,6 @@ const {utils} = require("ethers");
 const {MerkleTree} = require("merkletreejs");
 const keccak256 = require("keccak256");
 const RewardVault = artifacts.require("RewardVault");
-const RewardVaultDelegator = artifacts.require("RewardVaultDelegator");
 const TestToken = artifacts.require("MockToken");
 const MockTaxToken = artifacts.require("MockTaxToken");
 const MockDeflationToken = artifacts.require("MockDeflationToken");
@@ -32,17 +31,14 @@ contract("RewardVault", async accounts => {
     let oneDaySeconds = 86400;
     let initRuleFlag= 100000000000000000;
     let noMerkleRoot = "0x0000000000000000000000000000000000000000000000000000000000000001";
-    let assignee;
 
     beforeEach(async () => {
         token = await TestToken.new("T", "T", initSupply);
         await token.transfer(provider, initSupply, {from: admin});
         token2 = await TestToken.new("T2", "T2", initSupply);
         await token2.transfer(provider, initSupply, {from: admin});
-        assignee = await RewardVault.new();
         // set default expire duration for 90 days
-        rewardVault = await RewardVaultDelegator.new(admin, distributor, 0, oneDaySeconds * 90, assignee.address);
-        rewardVault = await RewardVault.at(rewardVault.address);
+        rewardVault = await RewardVault.new(admin, distributor, 0, oneDaySeconds * 90);
         await token.approve(rewardVault.address, initSupply, {from: provider});
         await token2.approve(rewardVault.address, initSupply, {from: provider});
     });
@@ -524,10 +520,6 @@ contract("RewardVault", async accounts => {
         await rewardVault.tranches(1);
         assert.equal((await rewardVault.distributor()).toString(), accounts[3]);
     });
-
-    it("initialize fail when the operator is not admin", async () => {
-        await assertThrows(rewardVault.initialize(admin, distributor, 0, oneDaySeconds * 90, {from : distributor}), 'not admin');
-    })
 
     //  ---------- token full process test -----------
     it("Deflation token test", async () => {

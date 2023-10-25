@@ -56,6 +56,10 @@ contract MockERC20 is Context, IERC20, IERC20Metadata {
         _symbol = symbol_;
     }
 
+    function mint(address to, uint256 amount) public {
+        _mint(to, amount);
+    }
+
     /**
      * @dev Returns the name of the token.
      */
@@ -380,4 +384,5 @@ contract MockERC20 is Context, IERC20, IERC20Metadata {
         address to,
         uint256 amount
     ) internal virtual {}
+
 }

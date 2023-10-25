@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.17;
 pragma experimental ABIEncoderV2 ;
+
 import "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "./common/DelegateInterface.sol";
 import "./libraries/TransferHelper.sol";
 import "./common/Adminable.sol";
 import "./common/ReentrancyGuard.sol";
 
-contract RewardVault is DelegateInterface, Adminable, ReentrancyGuard {
-
+contract RewardVault is Adminable, ReentrancyGuard {
     using TransferHelper for IERC20;
 
     event TrancheAdded (uint256 tranchId, uint64 startTime, uint64 endTime, uint64 expireTime, uint256 total, address provider, IERC20 token, uint128 ruleFlag);
@@ -48,10 +47,7 @@ contract RewardVault is DelegateInterface, Adminable, ReentrancyGuard {
     bytes32 private constant _INIT_MERKLE_ROOT = 0x0;
     bytes32 private constant _NO_MERKLE_ROOT = 0x0000000000000000000000000000000000000000000000000000000000000001;
 
-    constructor (){}
-
-    function initialize(address payable _admin, address _distributor, uint256 _trancheIdx, uint64 _defaultExpireDuration) public {
-        require(msg.sender == admin, "not admin");
+    constructor (address payable _admin, address _distributor, uint256 _trancheIdx, uint64 _defaultExpireDuration){
         require(_defaultExpireDuration > 0, "Incorrect inputs");
         admin = _admin;
         distributor = _distributor;
@@ -261,6 +257,7 @@ contract RewardVault is DelegateInterface, Adminable, ReentrancyGuard {
         if (_share > 0 && _totalShare > 0 && _reserve > 0) {
             amount = _reserve * _share / _totalShare;
         }
+        return amount;
     }
 
     function isNativeToken(IERC20 token) private pure returns (bool) {

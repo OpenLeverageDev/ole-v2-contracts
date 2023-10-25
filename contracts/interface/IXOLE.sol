@@ -9,7 +9,7 @@ interface IXOLE{
 
     function balanceOf(address addr) external view returns (uint256);
 
-    function locked(address addr) external view returns (uint256 amount, uint256 end);
+    function locked(address addr) external view returns (uint256 amount, uint256 lockTime);
 
 }
 
