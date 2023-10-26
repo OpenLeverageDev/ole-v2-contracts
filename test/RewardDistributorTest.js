@@ -409,7 +409,7 @@ contract("OLE reward distributor", async accounts => {
     it("User convert reward to increase xole amount success", async () => {
         await pair.mint(user1, toWei(10));
         await pair.approve(xole.address, toWei(10), {from: user1});
-        await xole.create_lock_for(user1, toWei(10), blockTime + 5 * 7 * 86400, {from: user1});
+        await xole.create_lock_for(user1, toWei(10), blockTime + 6 * 7 * 86400, {from: user1});
         let lockInfoBefore = await xole.locked(user1);
         m.log("create user1 xole lock finished");
         m.log("current user xole amount is", lockInfoBefore.amount);
@@ -431,7 +431,7 @@ contract("OLE reward distributor", async accounts => {
     it("User convert reward to increase xole amount success for others success", async () => {
         await pair.mint(user2, toWei(10));
         await pair.approve(xole.address, toWei(10), {from: user2});
-        await xole.create_lock_for(user2, toWei(10), blockTime + 5 * 7 * 86400, {from: user2});
+        await xole.create_lock_for(user2, toWei(10), blockTime + 6 * 7 * 86400, {from: user2});
         let lockInfoBefore = await xole.locked(user2);
         m.log("create user2 xole lock finished");
         m.log("current user2 xole amount is", lockInfoBefore.amount);

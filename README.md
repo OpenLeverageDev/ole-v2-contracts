@@ -54,11 +54,11 @@ The `RewardVault` contract  is a versatile infrastructure that allows users and 
 
 The `RewardDistributor` contract is a part of the OpenLeverage protocol. It is responsible for distributing rewards to users for each epoch of Ole reward issuance. Users can vest their rewards, withdraw them, or convert them into XOLE tokens. The contract also enforces vesting time, exit penalties, and supports advanced features such as early reward conversion.
 
-- **Vests**: Users can vest their rewards for a specific epoch. This is done using the `vest` or `vests` function, where they specify the epoch, balance, and provide a valid Merkle proof.
+- **Vest**: Users can vest their rewards for a specific epoch. This is done using the `vest` function, where they specify the epoch, balance, and provide a valid Merkle proof.
 
-- **Withdraw Rewards**: Users can withdraw their vested rewards using the `withdrawReward` or `withdrawRewards` function. They can also choose to exit early with a penalty.
+- **Withdraw Rewards**: Users can withdraw their vested rewards using the `withdraw` or `withdrawMul` function. They can also choose to exit early with a penalty using the `earlyExit` function.
 
-- **Convert to XOLE**: Users can convert their rewards into XOLE tokens using the `convertToXOLE` or `convertToXOLEs` function, provided they meet certain conditions.
+- **Convert to XOLE**: Users can convert their rewards into XOLE tokens using the `convertToNewXole` or `convertAndIncreaseXoleAmount` function, provided they meet certain conditions. Users can also transfer xole to other addresses at the same time as conversion using the `convertToNewXoleForOthers` or `convertAndIncreaseXoleAmountForOthers` function.
 
 
 ## Getting Started

@@ -249,7 +249,7 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
     function _convertOLE(uint256 epochId, address account) internal returns (uint256) {
         Reward storage reward = rewards[epochId][account];
         uint convertible = reward.amount - reward.withdrawn;
-        if (convertible == 0) revert InvalidAmount();
+        if (reward.amount == 0 || convertible == 0) revert InvalidAmount();
         reward.withdrawn = reward.amount;
         emit ConvertedToXOLE(epochId, account, convertible);
         return convertible;
