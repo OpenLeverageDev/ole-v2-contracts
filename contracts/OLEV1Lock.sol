@@ -7,8 +7,8 @@ import "./libraries/TransferHelper.sol";
 contract OLEV1Lock {
     using TransferHelper for IERC20;
 
-    IERC20 public ole;
-    uint64 public expireTime;
+    IERC20 public immutable ole;
+    uint64 public immutable expireTime;
 
     event Locked (address account, uint amount);
 

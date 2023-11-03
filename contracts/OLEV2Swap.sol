@@ -9,9 +9,9 @@ import "./libraries/TransferHelper.sol";
 contract OLEV2Swap is Adminable, ReentrancyGuard {
     using TransferHelper for IERC20;
 
-    IERC20 public oleV1;
-    IERC20 public oleV2;
-    uint64 public expireTime;
+    IERC20 public immutable oleV1;
+    IERC20 public immutable oleV2;
+    uint64 public immutable expireTime;
 
     event Swapped (address account, uint amount);
 

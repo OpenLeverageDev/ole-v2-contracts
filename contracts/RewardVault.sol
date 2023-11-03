@@ -61,7 +61,7 @@ contract RewardVault is Adminable, ReentrancyGuard {
     /// @param startTime The time of distribution rewards begins.
     /// @param endTime The time of distribution rewards ends.
     /// @param ruleFlag Flag corresponds to the rules of reward distribution.
-    function newTranche(uint256 total, IERC20 token, uint64 startTime, uint64 endTime, uint128 ruleFlag) external payable {
+    function newTranche(uint256 total, IERC20 token, uint64 startTime, uint64 endTime, uint128 ruleFlag) external payable nonReentrant {
         require(startTime > block.timestamp && endTime > startTime && total > 0 && ruleFlag > 0, "Incorrect inputs");
         uint256 _transferIn = transferIn(msg.sender, token, total);
         uint256 _trancheId = ++ trancheIdx;
@@ -75,7 +75,7 @@ contract RewardVault is Adminable, ReentrancyGuard {
     /// @param startTime The time of distribution rewards begins.
     /// @param endTime The time of distribution rewards ends.
     /// @param add Added token amount.
-    function updateTranche(uint256 _trancheId, uint64 startTime, uint64 endTime, uint256 add) external payable {
+    function updateTranche(uint256 _trancheId, uint64 startTime, uint64 endTime, uint256 add) external payable nonReentrant {
         Tranche storage tranche = tranches[_trancheId];
         require(tranche.provider == msg.sender, "No permission");
         require(block.timestamp < tranche.startTime, 'Already started');
@@ -187,7 +187,7 @@ contract RewardVault is Adminable, ReentrancyGuard {
         require(tranche.provider == msg.sender, "No permission");
         require(tranche.merkleRoot != _INIT_MERKLE_ROOT, "Not start");
         uint recycling = tranche.unDistribute;
-        uint distributed = tranche.total - tranche.unDistribute - tranche.tax;
+        uint distributed = getDistribute(tranche);
         // can recycle expire
         if (block.timestamp >= tranche.expireTime && distributed > tranche.claimed){
             recycling = recycling + distributed - tranche.claimed;
@@ -205,6 +205,8 @@ contract RewardVault is Adminable, ReentrancyGuard {
         require(tranche.merkleRoot != _NO_MERKLE_ROOT, "No Reward");
         require(tranche.expireTime > block.timestamp, "Expired");
         require(!claimed[_trancheId][msg.sender], "Already claimed");
+        uint distributed = getDistribute(tranche);
+        require(_share > 0 && _share + tranche.claimed <= distributed, "Invalid amount");
         require(_verifyClaim(msg.sender, tranche.merkleRoot, _share, _merkleProof), "Incorrect merkle proof");
         claimed[_trancheId][msg.sender] = true;
         tranche.claimed = tranche.claimed + _share;
@@ -247,6 +249,10 @@ contract RewardVault is Adminable, ReentrancyGuard {
             totalShare[token] = _totalShare - share;
             token.safeTransfer(to, shareToAmount(share, token.balanceOf(address(this)), _totalShare));
         }
+    }
+
+    function getDistribute(Tranche memory tranche) internal pure returns (uint256){
+        return tranche.total - tranche.unDistribute - tranche.tax;
     }
 
     function amountToShare(uint _amount, uint _reserve, uint _totalShare) private pure returns (uint share){

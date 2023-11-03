@@ -45,7 +45,8 @@ contract("OLE reward distributor", async accounts => {
         pair = await MockUniV2ClassPair.new(ole.address, usd.address, toWei(10000).toString(), toWei(10000).toString());
         xole = await MockXOLE.new(pair.address);
         contract = await RewardDistributor.new(ole.address, pair.address, usd.address, xole.address, 30 * day);
-        await ole.mint(contract.address, total);
+        await ole.mint(admin, total);
+        await ole.approve(contract.address, total);
         await usd.mint(user1, defaultReward);
         blockTime = await lastBlockTime();
     });
@@ -63,6 +64,8 @@ contract("OLE reward distributor", async accounts => {
         assert.equal(epoch.penaltyAdd, defaultExitPenaltyAdd);
         m.log("add epoch success");
 
+        await ole.mint(admin, total);
+        await ole.approve(contract.address, total);
         let tx = await contract.newEpoch(merkleRoot, total, blockTime, blockTime + 2 * day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd);
         let epoch2 = await contract.epochs(2);
         assert.equal(epoch2.expireTime, blockTime + 2 * day);
@@ -87,6 +90,18 @@ contract("OLE reward distributor", async accounts => {
 
     it("Add epoch fail when expire time before current block time", async () => {
         await assertThrows(contract.newEpoch(merkleRoot, total, blockTime - 1, blockTime, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd), 'InvalidTime()');
+    })
+
+    it("Add epoch fail when penaltyBase + penaltyAdd >= PERCENT_DIVISOR", async () => {
+        await assertThrows(contract.newEpoch(merkleRoot, total, blockTime - 1, blockTime + 2 * day, defaultVestDuration, 4000, 6000), 'InvalidAmount()');
+    })
+
+    it("Add epoch fail when total is zero", async () => {
+        await assertThrows(contract.newEpoch(merkleRoot, 0, blockTime - 1, blockTime + 2 * day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd), 'InvalidAmount()');
+    })
+
+    it("Add epoch fail when msg sender ole amount not enough", async () => {
+        await assertThrows(contract.newEpoch(merkleRoot, toWei(100), blockTime - 1, blockTime + 2 * day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd), 'TFF');
     })
 
     // ------  user vest test  ------
@@ -135,6 +150,13 @@ contract("OLE reward distributor", async accounts => {
         m.log("user1 epoch reward is", defaultReward);
         m.log("user1 start vest amount is", toWei(11));
         await assertThrows(contract.vest(1, toWei(11), merkleTree.getHexProof(leaves[0]), {from : user1}), 'IncorrectMerkleProof()');
+    })
+
+    it("User vest fail when vest amount add epoch vested amount more than total", async () => {
+        await contract.newEpoch(merkleRoot, toWei(10), blockTime - 1, blockTime + day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd);
+        m.log("epoch total reward is", toWei(10));
+        m.log("user1 vest amount is", toWei(11));
+        await assertThrows(contract.vest(1, toWei(11), merkleTree.getHexProof(leaves[0]), {from : user1}), 'InvalidAmount()');
     })
 
     // ------  user withdraw and early exit test  ------
@@ -299,6 +321,8 @@ contract("OLE reward distributor", async accounts => {
 
     it("User withdraw multiple epoch reward at once success", async () => {
         await contract.newEpoch(merkleRoot, total, blockTime - 1, blockTime + day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd);
+        await ole.mint(admin, total);
+        await ole.approve(contract.address, total);
         await contract.newEpoch(merkleRoot, total, blockTime - 1, blockTime + day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd);
         await contract.vest(1, defaultReward, merkleTree.getHexProof(leaves[0]), {from : user1});
         await contract.vest(2, defaultReward, merkleTree.getHexProof(leaves[0]), {from : user1});
@@ -585,8 +609,8 @@ contract("OLE reward distributor", async accounts => {
         await assertThrows(contract.setMinXOLELockDuration(60 * day, {from : user1}), 'caller must be admin');
     })
 
-    it("Add epoch fail when the operator is not admin", async () => {
-        await assertThrows(contract.newEpoch(merkleRoot, total, blockTime - 1, blockTime + day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd, {from : user1}), 'caller must be admin');
+    it("Add epoch fail when the operator is not admin or dev", async () => {
+        await assertThrows(contract.newEpoch(merkleRoot, total, blockTime - 1, blockTime + day, defaultVestDuration, defaultExitPenaltyBase, defaultExitPenaltyAdd, {from : user1}), 'Only admin or dev');
     })
 
 })

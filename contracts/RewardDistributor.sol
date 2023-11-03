@@ -15,6 +15,8 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
 
     error InvalidAmount();
     error InvalidTime();
+    error InvalidPenalty();
+    error InsufficientTransfersIn();
     error NotStarted();
     error Expired();
     error NotExpired();
@@ -69,22 +71,23 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
     }
 
     event VestStarted(uint256 epochId, address account, uint256 balance, uint256 vestTime);
-    event Withdrawn(uint256 epochId, address account, uint amount, uint penalty);
-    event ConvertedToXOLE(uint256 epochId, address account, uint amount);
+    event Withdrawn(uint256 epochId, address account, uint256 amount, uint256 penalty);
+    event ConvertedToXOLE(uint256 epochId, address account, uint256 amount);
 
     event EpochAdded(uint256 epochId, bytes32 merkleRoot, uint256 total, uint256 startTime, uint256 expireTime, uint256 vestDuration, uint16 penaltyBase, uint16 penaltyAdd);
     event Recycled(uint256 epochId, uint256 recycledAmount);
     event PenaltyWithdrawn(uint256 amount);
 
     function vest(uint256 _epochId, uint256 _balance, bytes32[] calldata _merkleProof) external {
-        if (_balance == 0) revert InvalidAmount();
-        if (block.timestamp < epochs[_epochId].startTime) revert NotStarted();
-        if (block.timestamp > epochs[_epochId].expireTime) revert Expired();
+        Epoch storage epoch = epochs[_epochId];
+        if (block.timestamp < epoch.startTime) revert NotStarted();
+        if (block.timestamp > epoch.expireTime) revert Expired();
+        if (_balance == 0 || _balance + epoch.vested > epoch.total) revert InvalidAmount();
 
         Reward memory reward = rewards[_epochId][msg.sender];
         if (reward.amount > 0) revert AlreadyVested();
-        if (!_verifyVest(msg.sender, epochs[_epochId].merkleRoot, _balance, _merkleProof)) revert IncorrectMerkleProof();
-        epochs[_epochId].vested += _balance;
+        if (!_verifyVest(msg.sender, epoch.merkleRoot, _balance, _merkleProof)) revert IncorrectMerkleProof();
+        epoch.vested += _balance;
         rewards[_epochId][msg.sender] = Reward(_balance, 0, block.timestamp);
         emit VestStarted(_epochId, msg.sender, _balance, block.timestamp);
     }
@@ -140,7 +143,7 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
     }
 
     function getWithdrawable(address account, uint256[] calldata _epochIds) external view returns (uint256[] memory results){
-        uint len = _epochIds.length;
+        uint256 len = _epochIds.length;
         results = new uint256[](len);
         for (uint256 i = 0; i < len; i++) {
             Reward memory reward = rewards[_epochIds[i]][account];
@@ -172,10 +175,12 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
         uint256 vestDuration,
         uint16 penaltyBase,
         uint16 penaltyAdd)
-    external onlyAdmin verifyDuration(vestDuration) {
+    external onlyAdminOrDeveloper verifyDuration(vestDuration) {
         if (expireTime <= startTime || expireTime <= block.timestamp) revert InvalidTime();
-        if (total == 0 || penaltyBase > PERCENT_DIVISOR || penaltyAdd > PERCENT_DIVISOR) revert InvalidAmount();
-        uint epochId = ++epochIdx;
+        if (total == 0 || penaltyBase + penaltyAdd >= PERCENT_DIVISOR) revert InvalidAmount();
+        uint256 received = oleToken.safeTransferFrom(msg.sender, address(this), total);
+        if(received != total) revert InsufficientTransfersIn();
+        uint256 epochId = ++epochIdx;
         epochs[epochId] = Epoch(merkleRoot, total, 0, startTime, expireTime, vestDuration, penaltyBase, penaltyAdd, false);
         emit EpochAdded(epochId, merkleRoot, total, startTime, expireTime, vestDuration, penaltyBase, penaltyAdd);
     }
@@ -242,20 +247,21 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
         uint256 penaltyFactor = (endTime - block.timestamp) * epoch.penaltyAdd / epoch.vestDuration + epoch.penaltyBase;
         uint256 locked = reward.amount - releaseable;
         penalty = locked * penaltyFactor / PERCENT_DIVISOR;
+        if (penalty >= locked) revert InvalidPenalty();
         withdrawable += locked - penalty;
         return (withdrawable, penalty);
     }
 
     function _convertOLE(uint256 epochId, address account) internal returns (uint256) {
         Reward storage reward = rewards[epochId][account];
-        uint convertible = reward.amount - reward.withdrawn;
+        uint256 convertible = reward.amount - reward.withdrawn;
         if (reward.amount == 0 || convertible == 0) revert InvalidAmount();
         reward.withdrawn = reward.amount;
         emit ConvertedToXOLE(epochId, account, convertible);
         return convertible;
     }
 
-    function _convertToNewXole(address account, uint oleAmount, uint256 token1MaxAmount, uint256 unlockTime) internal {
+    function _convertToNewXole(address account, uint256 oleAmount, uint256 token1MaxAmount, uint256 unlockTime) internal {
         unlockTime = unlockTime / WEEK * WEEK;
         verifyUnlockTime(unlockTime);
         uint256 liquidity = formLp(oleAmount, token1MaxAmount);
@@ -263,7 +269,7 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
         IXOLE(xole).create_lock_for(account, liquidity, unlockTime);
     }
 
-    function _convertAndIncreaseXoleAmount(address account, uint oleAmount, uint256 token1MaxAmount) internal {
+    function _convertAndIncreaseXoleAmount(address account, uint256 oleAmount, uint256 token1MaxAmount) internal {
         (,uint256 lockTime) = IXOLE(xole).locked(account);
         verifyUnlockTime(lockTime);
         uint256 liquidity = formLp(oleAmount, token1MaxAmount);
@@ -271,7 +277,7 @@ contract RewardDistributor is Adminable, ReentrancyGuard {
         IXOLE(xole).increase_amount_for(account, liquidity);
     }
 
-    function formLp(uint oleAmount, uint256 token1MaxAmount) internal returns (uint256 liquidity){
+    function formLp(uint256 oleAmount, uint256 token1MaxAmount) internal returns (uint256 liquidity){
         (uint256 reserveA, uint256 reserveB) = getReserves(address(oleToken), token1);
         uint256 amountBOptimal = oleAmount * reserveB / reserveA;
         if (amountBOptimal > token1MaxAmount) revert ExceedMax(amountBOptimal);

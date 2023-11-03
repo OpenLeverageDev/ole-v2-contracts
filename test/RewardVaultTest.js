@@ -403,6 +403,20 @@ contract("RewardVault", async accounts => {
         await assertThrows(rewardVault.claim(1, toWei(20), merkleTree.getHexProof(leaves[user1Index]), {from : user1}), 'Incorrect merkle proof');
     });
 
+    it("claim fail when claim amount more than distributed", async () => {
+        await newTranche(token.address, toWei(5), 0);
+        m.log("add new tranche finished, supply total amount is", toWei(5));
+        await advanceMultipleBlocksAndAssignTime( 1, oneDaySeconds * 2 + 1);
+        const merkleTree = new MerkleTree(leaves, keccak256, {sort: true});
+        const root = merkleTree.getHexRoot();
+        await rewardVault.setTrancheTree(1, toWei(2), toWei(2), toWei(1), root, {from : distributor});
+        m.log("set tree finished, set distribute amount is", toWei(2));
+        let user1Index = 0;
+        let user1 = users[user1Index].address;
+        m.log("claim amount is", toWei(10));
+        await assertThrows(rewardVault.claim(1, toWei(10), merkleTree.getHexProof(leaves[user1Index]), {from : user1}), 'Invalid amount');
+    });
+
     it("claim fail when admin not set merkle root", async () => {
         await newTranche(token.address, initRewardAmount, 0);
         await advanceMultipleBlocksAndAssignTime( 1, oneDaySeconds * 2 + 1);
