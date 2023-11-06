@@ -70,3 +70,8 @@ git clone https://github.com/OpenLeverageDev/ole-v2-contracts.git
 We use Hardhat as the development environment for compiling, deploying, and testing.
 
 `npx hardhat test`
+
+
+## Audits
+----------
+- [PeckShield Nov 2023](/audits/PeckShield-Audit-Report-OLEv2-v1.0.pdf)
