@@ -61,17 +61,14 @@ The `RewardDistributor` contract is a part of the OpenLeverage protocol. It is r
 - **Convert to XOLE**: Users can convert their rewards into XOLE tokens using the `convertToNewXole` or `convertAndIncreaseXoleAmount` function, provided they meet certain conditions. Users can also transfer xole to other addresses at the same time as conversion using the `convertToNewXoleForOthers` or `convertAndIncreaseXoleAmountForOthers` function.
 
 
+## Audits
+- [PeckShield Nov 2023](/audits/PeckShield-Audit-Report-OLEv2-v1.0.pdf)
+
 ## Getting Started
 get started with the OLE Token upgrade project:
 git clone https://github.com/OpenLeverageDev/ole-v2-contracts.git
-
 
 ## Build and Test
 We use Hardhat as the development environment for compiling, deploying, and testing.
 
 `npx hardhat test`
-
-
-## Audits
-----------
-- [PeckShield Nov 2023](/audits/PeckShield-Audit-Report-OLEv2-v1.0.pdf)
