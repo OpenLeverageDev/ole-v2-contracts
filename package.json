@@ -14,7 +14,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@openzeppelin/contracts": "4.9.3",
+    "@openzeppelin/contracts": "4.9.6",
     "@openzeppelin/test-helpers": "^0.5.15",
     "@layerzerolabs/solidity-examples": "0.0.13"
   },
